@@ -7,9 +7,42 @@ import dayjs from 'dayjs';
 import 'dayjs/locale/pt-br.js';
 
 dotenv.config();
+const app = express();
+app.use(cors());
+app.use(express.json());
 
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let db;
+
+setInterval(async () => {
+    await mongoClient.connect();
+    try {
+        db = mongoClient.db("uol");
+        const participantsCollection = db.collection("participants");
+        const messagesCollection = db.collection("messages");
+        const participants = await participantsCollection.find({}).toArray();
+
+        participants.map(async user => {
+            const time = Date.now();
+            console.log("1: ", user.lastStatus);
+            console.log("2: ", Date.now());
+            if(parseInt(user.lastStatus) < parseInt(time) - 10000){
+                await participantsCollection.deleteOne({_id: user._id});
+                await messagesCollection.insertOne({
+                    from: user.name,
+                    to: 'Todos',
+                    text: 'sai na sala...',
+                    type: "status",
+                    time: dayjs(Date.now()).locale('pt').format('HH:mm:ss')
+                });
+            }
+            mongoClient.close();
+        });
+    } catch (error) {
+        console.log("Deu ruim, paizão");
+        mongoClient.close();
+    }
+}, 15000);
 
 const participantPostSchema = joi.object({
     name: joi.string().required(),
@@ -20,14 +53,10 @@ const messagePostSchema = joi.object({
     type: joi.string().allow('message', 'private_message').required()
 });
 
-const app = express();
-app.use(cors());
-app.use(express.json());
 
 
 /* **************************************************************** */
 // console.log(dayjs(Date.now()).locale('pt').format('HH:mm:ss'));
-
 
 app.post("/participants", async (req, res) => {
     const validation = participantPostSchema.validate(req.body);
@@ -141,7 +170,6 @@ app.get("/participants", async (req, res) => {
     }
 });
 
-
 app.get("/messages", async (req, res) => {
     const limit = req.query.limit;
     const username = req.headers.user;
@@ -151,14 +179,14 @@ app.get("/messages", async (req, res) => {
         const messagesCollection = db.collection("messages");
         const messages = await messagesCollection.find({
             $or: [
-                {to: username}, {from: username}, {to: "Todos"}
+                { to: username }, { from: username }, { to: "Todos" }
             ]
         }).toArray();
         if (limit) {
 
             const filterMessages = [];
 
-            for(let i = 0; i < (limit >= messages.length ? messages.length : limit - 1); i++){
+            for (let i = 0; i < (limit >= messages.length ? messages.length : limit - 1); i++) {
                 filterMessages.push(messages[i]);
             }
 
@@ -174,7 +202,6 @@ app.get("/messages", async (req, res) => {
         mongoClient.close();
     }
 });
-
 
 
 
