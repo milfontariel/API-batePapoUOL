@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
 import joi from 'joi';
 import dotenv from 'dotenv';
 import dayjs from 'dayjs';
@@ -24,8 +24,6 @@ setInterval(async () => {
 
         participants.map(async user => {
             const time = Date.now();
-            console.log("1: ", user.lastStatus);
-            console.log("2: ", Date.now());
             if(parseInt(user.lastStatus) < parseInt(time) - 10000){
                 await participantsCollection.deleteOne({_id: user._id});
                 await messagesCollection.insertOne({
@@ -52,11 +50,6 @@ const messagePostSchema = joi.object({
     text: joi.string().required(),
     type: joi.string().allow('message', 'private_message').required()
 });
-
-
-
-/* **************************************************************** */
-// console.log(dayjs(Date.now()).locale('pt').format('HH:mm:ss'));
 
 app.post("/participants", async (req, res) => {
     const validation = participantPostSchema.validate(req.body);
@@ -183,16 +176,9 @@ app.get("/messages", async (req, res) => {
             ]
         }).toArray();
         if (limit) {
-
-            const filterMessages = [];
-
-            for (let i = 0; i < (limit >= messages.length ? messages.length : limit - 1); i++) {
-                filterMessages.push(messages[i]);
-            }
-
+            const filterMessages = [...messages].reverse().slice(0, parseInt(limit)).reverse();
             res.send(filterMessages);
             mongoClient.close();
-
         } else {
             res.send(messages);
             mongoClient.close();
@@ -203,6 +189,32 @@ app.get("/messages", async (req, res) => {
     }
 });
 
-
+app.delete("/messages/:messageId", async (req, res) => {
+    try {
+        const username = req.headers.user;
+        const id = req.params.messageId;
+        await mongoClient.connect();
+        db = mongoClient.db("uol");
+        const messagesCollection = db.collection("messages");
+        const validate = await messagesCollection.findOne({_id: new ObjectId(id)});
+        if(validate){
+            if(validate.from == username){
+                await messagesCollection.deleteOne({_id: new ObjectId(id)});
+                res.sendStatus(200);
+                mongoClient.close();
+            } else {
+                res.sendStatus(401)
+                mongoClient.close();
+            }
+        } else {
+            res.sendStatus(404);
+            mongoClient.close();
+        }
+        
+    } catch (error) {
+        res.sendStatus(500);
+        mongoClient.close();
+    }
+});
 
 app.listen(5000);
