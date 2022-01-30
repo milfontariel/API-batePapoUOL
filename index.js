@@ -5,6 +5,8 @@ import joi from 'joi';
 import dotenv from 'dotenv';
 import dayjs from 'dayjs';
 import 'dayjs/locale/pt-br.js';
+import {stripHtml} from 'string-strip-html';
+import trim from 'trim';
 
 dotenv.config();
 const app = express();
@@ -24,21 +26,19 @@ setInterval(async () => {
 
         participants.map(async user => {
             const time = Date.now();
-            if(parseInt(user.lastStatus) < parseInt(time) - 10000){
-                await participantsCollection.deleteOne({_id: user._id});
+            if (parseInt(user.lastStatus) < parseInt(time) - 10000) {
+                await participantsCollection.deleteOne({ _id: user._id });
                 await messagesCollection.insertOne({
                     from: user.name,
                     to: 'Todos',
-                    text: 'sai na sala...',
+                    text: 'sai da sala...',
                     type: "status",
                     time: dayjs(Date.now()).locale('pt').format('HH:mm:ss')
                 });
             }
-            mongoClient.close();
         });
     } catch (error) {
-        console.log("Deu ruim, paizão");
-        mongoClient.close();
+        console.log("Erro");
     }
 }, 15000);
 
@@ -52,6 +52,7 @@ const messagePostSchema = joi.object({
 });
 
 app.post("/participants", async (req, res) => {
+    await mongoClient.connect();
     const validation = participantPostSchema.validate(req.body);
     if (validation.error) {
         res.status(422).send(validation.error.details.map(erro => {
@@ -61,38 +62,38 @@ app.post("/participants", async (req, res) => {
         return
     }
     try {
-        await mongoClient.connect();
+        const strippedName = stripHtml(req.body.name).result;
         db = mongoClient.db("uol");
         const participantsCollection = db.collection("participants");
         const messagesCollection = db.collection("messages");
-        const validate = await participantsCollection.findOne({ name: req.body.name });
+        const validate = await participantsCollection.findOne({ name: strippedName });
 
         if (validate) {
             res.status(409).send("Usuário já existe")
-            mongoClient.close();
+            
         } else {
             await participantsCollection.insertOne({
-                name: req.body.name,
+                name: strippedName,
                 lastStatus: Date.now()
             });
             await messagesCollection.insertOne({
-                from: req.body.name,
+                from: strippedName,
                 to: 'Todos',
                 text: 'entra na sala...',
                 type: "status",
                 time: dayjs(Date.now()).locale('pt').format('HH:mm:ss')
             });
             res.sendStatus(201);
-            mongoClient.close();
         }
 
     } catch (error) {
         res.status(500).send(error);
-        mongoClient.close();
     }
+    mongoClient.close();
 });
 
 app.post("/messages", async (req, res) => {
+    await mongoClient.connect();
     const validation = messagePostSchema.validate(req.body);
     if (validation.error) {
         res.status(422).send(validation.error.details.map(erro => {
@@ -103,7 +104,6 @@ app.post("/messages", async (req, res) => {
     }
     try {
         const username = req.headers.user;
-        await mongoClient.connect();
         db = mongoClient.db("uol");
         const participantsCollection = db.collection("participants");
         const messagesCollection = db.collection("messages");
@@ -111,49 +111,46 @@ app.post("/messages", async (req, res) => {
 
         if (validate) {
             await messagesCollection.insertOne({
-                ...req.body,
-                from: username,
+                to: trim(stripHtml(req.body.to).result),
+                text: trim(stripHtml(req.body.text).result),
+                type: trim(stripHtml(req.body.type).result),
+                from: trim(stripHtml(username).result),
                 time: dayjs(Date.now()).locale('pt').format('HH:mm:ss')
             });
             res.sendStatus(201);
-            mongoClient.close();
         } else {
-            res.status(422).send("deu berg, paizao");
-            mongoClient.close();
+            res.sendStatus(422);
         }
 
     } catch (error) {
         res.sendStatus(500);
-        mongoClient.close();
     }
+    mongoClient.close();
 });
 
 app.post("/status", async (req, res) => {
+    await mongoClient.connect();
     try {
         const username = req.headers.user;
-        await mongoClient.connect();
         db = mongoClient.db("uol");
         const participantsCollection = db.collection("participants");
         const validate = await participantsCollection.findOne({ name: username });
         if (validate) {
             await participantsCollection.updateOne({ _id: validate._id }, { $set: { lastStatus: Date.now() } })
             res.sendStatus(200);
-            mongoClient.close();
         } else {
             res.sendStatus(404);
-            mongoClient.close();
             return
         }
     } catch (error) {
-        res.status(500).send("Deu alguma merda aqui");
-        mongoClient.close();
+        res.sendStatus(500);
     }
-
+    mongoClient.close();
 });
 
 app.get("/participants", async (req, res) => {
+    await mongoClient.connect();
     try {
-        await mongoClient.connect();
         db = mongoClient.db("uol");
         const participantsCollection = db.collection("participants");
         const participants = await participantsCollection.find({}).toArray();
@@ -161,13 +158,14 @@ app.get("/participants", async (req, res) => {
     } catch (error) {
         res.sendStatus(500)
     }
+    mongoClient.close()
 });
 
 app.get("/messages", async (req, res) => {
     const limit = req.query.limit;
     const username = req.headers.user;
+    await mongoClient.connect();
     try {
-        await mongoClient.connect();
         db = mongoClient.db("uol");
         const messagesCollection = db.collection("messages");
         const messages = await messagesCollection.find({
@@ -178,28 +176,26 @@ app.get("/messages", async (req, res) => {
         if (limit) {
             const filterMessages = [...messages].reverse().slice(0, parseInt(limit)).reverse();
             res.send(filterMessages);
-            mongoClient.close();
         } else {
             res.send(messages);
-            mongoClient.close();
         }
     } catch (error) {
         res.sendStatus(500);
-        mongoClient.close();
     }
+    mongoClient.close();
 });
 
 app.delete("/messages/:messageId", async (req, res) => {
+    await mongoClient.connect();
     try {
         const username = req.headers.user;
         const id = req.params.messageId;
-        await mongoClient.connect();
         db = mongoClient.db("uol");
         const messagesCollection = db.collection("messages");
-        const validate = await messagesCollection.findOne({_id: new ObjectId(id)});
-        if(validate){
-            if(validate.from == username){
-                await messagesCollection.deleteOne({_id: new ObjectId(id)});
+        const validate = await messagesCollection.findOne({ _id: new ObjectId(id) });
+        if (validate) {
+            if (validate.from == username) {
+                await messagesCollection.deleteOne({ _id: new ObjectId(id) });
                 res.sendStatus(200);
                 mongoClient.close();
             } else {
@@ -210,11 +206,62 @@ app.delete("/messages/:messageId", async (req, res) => {
             res.sendStatus(404);
             mongoClient.close();
         }
-        
+
     } catch (error) {
         res.sendStatus(500);
         mongoClient.close();
     }
 });
+
+app.put("/messages/:messageId", async (req, res) => {
+    await mongoClient.connect();
+    const validation = messagePostSchema.validate(req.body);
+    if (validation.error) {
+        res.status(422).send(validation.error.details.map(erro => {
+            erro.message;
+        }));
+        mongoClient.close();
+        return
+    }
+    try {
+        const username = req.headers.user;
+        const id = req.params.messageId;
+        db = mongoClient.db("uol");
+        const participantsCollection = db.collection("participants");
+        const messagesCollection = db.collection("messages");
+        const validate = await participantsCollection.findOne({ name: username });
+
+        if (validate) {
+            const validateMessage = await messagesCollection.findOne({ _id: new ObjectId(id) });
+            if (validateMessage) {
+                if (validateMessage.from == username) {
+                    await messagesCollection.updateOne({
+                        _id: validateMessage._id
+                    }, {
+                        $set: {
+                            text: trim(stripHtml(req.body.text).result),
+                            time: dayjs(Date.now()).locale('pt').format('HH:mm:ss')
+                        }
+                    })
+                    res.sendStatus(201);
+                    mongoClient.close();
+                } else {
+                    res.sendStatus(401);
+                    mongoClient.close();
+                }
+            } else {
+                res.sendStatus(404);
+                mongoClient.close();
+            }
+        } else {
+            res.sendStatus(422);
+            mongoClient.close();
+        }
+
+    } catch (error) {
+        res.sendStatus(500);
+        mongoClient.close();
+    }
+})
 
 app.listen(5000);
